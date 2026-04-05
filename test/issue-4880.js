@@ -60,10 +60,10 @@ if (!isMainThread) {
 // ── Client / tests (runs in main thread) ────────────────────────────────────
 
 function startServer () {
-  return new Promise((resolve) => {
-    const worker = new Worker(__filename)
-    worker.once('message', ({ port }) => resolve({ worker, port }))
-  })
+  const { promise, resolve } = Promise.withResolvers()
+  const worker = new Worker(__filename)
+  worker.once('message', ({ port }) => resolve({ worker, port }))
+  return promise
 }
 
 function makeDispatcher (connections, maxConcurrentStreams) {

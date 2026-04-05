@@ -129,9 +129,9 @@ test('start headers timeout after async iterator request body', async (t) => {
       headersTimeout: 100
     })
     after(() => client.destroy())
-    let res
+    const { promise, resolve } = Promise.withResolvers()
     const body = (async function * () {
-      await new Promise((resolve) => { res = resolve })
+      await promise
       process.nextTick(() => {
         clock.tick(200)
       })
@@ -146,7 +146,7 @@ test('start headers timeout after async iterator request body', async (t) => {
           clock.tick(200)
         })
         queueMicrotask(() => {
-          res()
+          resolve()
         })
       },
       onResponseStart () {

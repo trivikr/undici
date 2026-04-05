@@ -134,7 +134,8 @@ for (let i = 0; i < testEnvironments.length; i++) {
   const environment = testEnvironments[i]
   const port = PORT + i
 
-  const promise = new Promise((resolve) => {
+  const { promise, resolve } = Promise.withResolvers()
+  {
     const cacheTestsWorkerProcess = fork(join(import.meta.dirname, 'cache-tests-worker.mjs'), {
       stdio: 'pipe',
       env: {
@@ -161,7 +162,7 @@ for (let i = 0; i < testEnvironments.length; i++) {
     cacheTestsWorkerProcess.on('close', code => {
       resolve([code, stdout])
     })
-  })
+  }
 
   results.push(promise)
 }

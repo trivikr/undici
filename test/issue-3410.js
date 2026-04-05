@@ -15,7 +15,8 @@ describe('https://github.com/nodejs/undici/issues/3410', () => {
     const {
       serverProcess,
       address
-    } = await new Promise((resolve, reject) => {
+    } = await (() => {
+      const { promise, resolve, reject } = Promise.withResolvers()
       const childProcess = fork(
         pathResolve(__dirname, './utils/hello-world-server.js'),
         [],
@@ -31,7 +32,8 @@ describe('https://github.com/nodejs/undici/issues/3410', () => {
       childProcess.on('error', err => {
         reject(err)
       })
-    })
+      return promise
+    })()
 
     const connectTimeout = 2000
     setGlobalDispatcher(new Agent({ connectTimeout }))
@@ -54,7 +56,8 @@ describe('https://github.com/nodejs/undici/issues/3410', () => {
     const {
       serverProcess,
       address
-    } = await new Promise((resolve, reject) => {
+    } = await (() => {
+      const { promise, resolve, reject } = Promise.withResolvers()
       const childProcess = fork(
         pathResolve(__dirname, './utils/hello-world-server.js'),
         [],
@@ -70,7 +73,8 @@ describe('https://github.com/nodejs/undici/issues/3410', () => {
       childProcess.on('error', err => {
         reject(err)
       })
-    })
+      return promise
+    })()
 
     const connectTimeout = 900
     setGlobalDispatcher(new Agent({ connectTimeout }))

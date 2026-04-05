@@ -81,28 +81,25 @@ async function bench (experiments, options = {}) {
 
     for (let i = 0; i < 8; ++i) {
       // warmup
-      await new Promise((resolve, reject) => {
-        const info = new Info(name, resolve)
+      const { promise, resolve, reject } = Promise.withResolvers()
+      const info = new Info(name, resolve)
 
-        try {
-          const p = fn(info)
+      try {
+        const p = fn(info)
 
-          waitMaybePromiseLike(p).catch((err) => reject(err))
-        } catch (err) {
-          reject(err)
-        }
-      })
+        waitMaybePromiseLike(p).catch((err) => reject(err))
+      } catch (err) {
+        reject(err)
+      }
+
+      await promise
     }
 
     let timing = 0
     const minSamples = options.minSamples ?? 128
 
     for (let j = 0; (j < minSamples || timing < 800_000_000) && (typeof options.maxSamples === 'number' ? options.maxSamples > j : true); ++j) {
-      let resolve = (value) => {}
-      let reject = (reason) => {}
-      const promise = new Promise(
-        (_resolve, _reject) => { resolve = _resolve; reject = _reject }
-      )
+      const { promise, resolve, reject } = Promise.withResolvers()
 
       const info = new Info(name, resolve)
 

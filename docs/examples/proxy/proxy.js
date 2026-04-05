@@ -44,9 +44,9 @@ class HTTPHandler {
     this.res = res
     this.resume = null
     this.abort = null
-    this.promise = new Promise((resolve, reject) => {
-      this.callback = err => err ? reject(err) : resolve()
-    })
+    const { promise, resolve, reject } = Promise.withResolvers()
+    this.promise = promise
+    this.callback = err => err ? reject(err) : resolve()
   }
 
   onRequestStart (controller) {
@@ -105,9 +105,9 @@ class WSHandler {
     this.socket = socket
     this.head = head
     this.abort = null
-    this.promise = new Promise((resolve, reject) => {
-      this.callback = err => err ? reject(err) : resolve()
-    })
+    const { promise, resolve, reject } = Promise.withResolvers()
+    this.promise = promise
+    this.callback = err => err ? reject(err) : resolve()
   }
 
   onRequestStart (controller) {
