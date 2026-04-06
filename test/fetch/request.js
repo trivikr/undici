@@ -313,6 +313,26 @@ test('post aborted signal cloned', (t) => {
   ac.abort('gwak')
 })
 
+test('derived request signal follows input request signal through clone chains', (t) => {
+  t.plan(5)
+
+  const ac = new AbortController()
+  const req1 = new Request('http://asd', { signal: ac.signal })
+  const req2 = new Request(req1)
+  const req3 = req2.clone()
+
+  t.assert.strictEqual(req2.signal.aborted, false)
+  t.assert.strictEqual(req3.signal.aborted, false)
+
+  ac.signal.addEventListener('abort', () => {
+    t.assert.strictEqual(req1.signal.reason, 'gwak')
+    t.assert.strictEqual(req2.signal.reason, 'gwak')
+    t.assert.strictEqual(req3.signal.reason, 'gwak')
+  }, { once: true })
+
+  ac.abort('gwak')
+})
+
 test('Passing headers in init', async (t) => {
   // https://github.com/nodejs/undici/issues/1400
   await t.test('Headers instance', (t) => {
