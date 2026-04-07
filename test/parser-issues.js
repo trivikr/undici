@@ -5,6 +5,19 @@ const { test, after } = require('node:test')
 const net = require('node:net')
 const { Client, errors } = require('..')
 
+function writeChunks (socket, chunks, delay = 1) {
+  socket.write(chunks[0])
+
+  let index = 1
+  const timer = setInterval(() => {
+    socket.write(chunks[index++])
+
+    if (index === chunks.length) {
+      clearInterval(timer)
+    }
+  }, delay)
+}
+
 test('https://github.com/mcollina/undici/issues/268', async (t) => {
   t = tspl(t, { plan: 2 })
 
@@ -122,6 +135,71 @@ test('split header value', async (t) => {
       path: '/'
     }, (err, data) => {
       t.ifError(err)
+      t.equal(data.headers.asd, 'asd,asd')
+      data.body.destroy().on('error', () => {})
+    })
+  })
+
+  await t.completed
+})
+
+test('repeatedly split header field and value', async (t) => {
+  t = tspl(t, { plan: 3 })
+
+  const server = net.createServer(socket => {
+    writeChunks(socket, [
+      'HTTP/1.1 200 OK\r\n',
+      'C',
+      'o',
+      'n',
+      'n',
+      'e',
+      'c',
+      't',
+      'i',
+      'o',
+      'n',
+      ':',
+      ' ',
+      'k',
+      'e',
+      'e',
+      'p',
+      '-',
+      'a',
+      'l',
+      'i',
+      'v',
+      'e',
+      '\r\n',
+      'A',
+      'S',
+      'D',
+      ': ',
+      'a',
+      's',
+      'd',
+      ',',
+      'a',
+      's',
+      'd',
+      '\r\n',
+      'Content-Length: 0\r\n',
+      '\r\n'
+    ])
+  })
+  after(() => server.close())
+
+  server.listen(0, () => {
+    const client = new Client(`http://localhost:${server.address().port}`)
+    after(() => client.destroy())
+
+    client.request({
+      method: 'GET',
+      path: '/'
+    }, (err, data) => {
+      t.ifError(err)
+      t.equal(data.headers.connection, 'keep-alive')
       t.equal(data.headers.asd, 'asd,asd')
       data.body.destroy().on('error', () => {})
     })
