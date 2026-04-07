@@ -4,6 +4,7 @@
     "bench": "PORT=3042 concurrently -k -s first npm:bench:server npm:bench:run",
     "bench:h2": "PORT=3052 concurrently -k -s first npm:bench:server:h2 npm:bench:run:h2",
     "bench-post": "PORT=3042 concurrently -k -s first npm:bench:server npm:bench-post:run",
+    "bench:client-h1:headers": "node ./client-h1-fragmented-headers.mjs",
     "bench:server": "node ./server.js",
     "bench:server:h2": "node ./server-http2.js",
     "prebench:run": "node ./wait.js",
