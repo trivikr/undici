@@ -188,4 +188,54 @@ describe('Readable', () => {
 
     t.strictEqual(text, 'hello world')
   })
+
+  test('prepended data listeners receive chunks during consume', async function (t) {
+    t = tspl(t, { plan: 2 })
+
+    function resume () {
+    }
+    function abort () {
+    }
+    const r = new Readable({ resume, abort })
+    const chunks = []
+
+    r.prependListener('data', (chunk) => {
+      chunks.push(chunk.toString())
+    })
+
+    const text = r.text()
+    await Promise.resolve()
+
+    r.push(Buffer.from('hello '))
+    r.push(Buffer.from('world'))
+    r.push(null)
+
+    t.deepStrictEqual(chunks, ['hello ', 'world'])
+    t.strictEqual(await text, 'hello world')
+  })
+
+  test('prepended once data listeners receive the first chunk during consume', async function (t) {
+    t = tspl(t, { plan: 2 })
+
+    function resume () {
+    }
+    function abort () {
+    }
+    const r = new Readable({ resume, abort })
+    const chunks = []
+
+    r.prependOnceListener('data', (chunk) => {
+      chunks.push(chunk.toString())
+    })
+
+    const text = r.text()
+    await Promise.resolve()
+
+    r.push(Buffer.from('hello '))
+    r.push(Buffer.from('world'))
+    r.push(null)
+
+    t.deepStrictEqual(chunks, ['hello '])
+    t.strictEqual(await text, 'hello world')
+  })
 })
