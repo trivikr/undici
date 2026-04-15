@@ -158,6 +158,29 @@ test('parseHeaders decodes array header values as latin1', () => {
   assert.strictEqual(result['x-test'][0].charCodeAt(0), 0xe2)
 })
 
+test('lazyHeaders defers materialization until accessed', () => {
+  const rawHeaders = [
+    Buffer.from('Content-Type'),
+    Buffer.from('text/plain'),
+    'Set-Cookie',
+    'a',
+    'Set-Cookie',
+    'b'
+  ]
+
+  const headers = util.lazyHeaders(rawHeaders)
+
+  rawHeaders[1] = Buffer.from('application/json')
+  rawHeaders[3] = 'c'
+
+  assert.strictEqual(headers['content-type'], 'application/json')
+  assert.deepEqual(headers['set-cookie'], ['c', 'b'])
+
+  rawHeaders[1] = Buffer.from('text/html')
+
+  assert.strictEqual(headers['content-type'], 'application/json')
+})
+
 test('parseRawHeaders', () => {
   assert.deepEqual(util.parseRawHeaders(['key', 'value', Buffer.from('key'), Buffer.from('value')]), ['key', 'value', 'key', 'value'])
   assert.deepEqual(util.parseRawHeaders(['content-length', 'value', 'content-disposition', 'form-data; name="fieldName"']), ['content-length', 'value', 'content-disposition', 'form-data; name="fieldName"'])
