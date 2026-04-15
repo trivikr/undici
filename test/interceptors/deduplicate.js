@@ -155,6 +155,61 @@ describe('Deduplicate Interceptor', () => {
     strictEqual(body2, 'response for br')
   })
 
+  test('deduplicates matching headers after same-path header collisions', async () => {
+    let requestsToOrigin = 0
+    const server = createServer({ joinDuplicateHeaders: true }, async (req, res) => {
+      requestsToOrigin++
+      await sleep(100)
+      res.end(`response for ${req.headers['accept-encoding']}`)
+    }).listen(0)
+
+    const client = new Client(`http://localhost:${server.address().port}`)
+      .compose(interceptors.deduplicate())
+
+    after(async () => {
+      server.close()
+      await client.close()
+    })
+
+    await once(server, 'listening')
+
+    const requestGzip = {
+      origin: 'localhost',
+      method: 'GET',
+      path: '/',
+      headers: {
+        'accept-encoding': 'gzip'
+      }
+    }
+
+    const requestBr = {
+      origin: 'localhost',
+      method: 'GET',
+      path: '/',
+      headers: {
+        'accept-encoding': 'br'
+      }
+    }
+
+    const [res1, res2, res3] = await Promise.all([
+      client.request(requestGzip),
+      client.request(requestBr),
+      client.request(requestGzip)
+    ])
+
+    strictEqual(requestsToOrigin, 2)
+
+    const [body1, body2, body3] = await Promise.all([
+      res1.body.text(),
+      res2.body.text(),
+      res3.body.text()
+    ])
+
+    strictEqual(body1, 'response for gzip')
+    strictEqual(body2, 'response for br')
+    strictEqual(body3, 'response for gzip')
+  })
+
   test('does not deduplicate requests with different paths', async () => {
     let requestsToOrigin = 0
     const server = createServer({ joinDuplicateHeaders: true }, async (req, res) => {
@@ -817,6 +872,50 @@ describe('Deduplicate Interceptor', () => {
     ])
 
     // Both requests should reach origin since header matching is case-insensitive
+    strictEqual(requestsToOrigin, 2)
+
+    const [body1, body2] = await Promise.all([
+      res1.body.text(),
+      res2.body.text()
+    ])
+
+    strictEqual(body1, 'response 1')
+    strictEqual(body2, 'response 2')
+  })
+
+  test('skipHeaderNames supports iterable headers', async () => {
+    let requestsToOrigin = 0
+    const server = createServer({ joinDuplicateHeaders: true }, async (req, res) => {
+      requestsToOrigin++
+      await sleep(100)
+      res.end(`response ${requestsToOrigin}`)
+    }).listen(0)
+
+    const client = new Client(`http://localhost:${server.address().port}`)
+      .compose(interceptors.deduplicate({ skipHeaderNames: ['x-no-dedupe'] }))
+
+    after(async () => {
+      server.close()
+      await client.close()
+    })
+
+    await once(server, 'listening')
+
+    const [res1, res2] = await Promise.all([
+      client.request({
+        origin: 'localhost',
+        method: 'GET',
+        path: '/',
+        headers: new Map([['X-No-Dedupe', 'true']])
+      }),
+      client.request({
+        origin: 'localhost',
+        method: 'GET',
+        path: '/',
+        headers: new Map([['x-no-dedupe', 'true']])
+      })
+    ])
+
     strictEqual(requestsToOrigin, 2)
 
     const [body1, body2] = await Promise.all([
