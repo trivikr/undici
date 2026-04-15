@@ -1213,6 +1213,89 @@ describe('Deduplicate Interceptor', () => {
     strictEqual(body2, 'chunk-1chunk-2')
   })
 
+  test('paused waiting handlers resume from a shared retained chunk log', async () => {
+    let requestsToOrigin = 0
+    const chunks = ['chunk-1', 'chunk-2', 'chunk-3', 'chunk-4']
+
+    const server = createServer({ joinDuplicateHeaders: true }, async (req, res) => {
+      requestsToOrigin++
+
+      await sleep(25)
+
+      for (const chunk of chunks) {
+        res.write(chunk)
+        await sleep(10)
+      }
+
+      res.end()
+    }).listen(0)
+
+    const client = new Client(`http://localhost:${server.address().port}`)
+      .compose(interceptors.deduplicate())
+
+    after(async () => {
+      server.close()
+      await client.close()
+    })
+
+    await once(server, 'listening')
+
+    const request = {
+      origin: 'localhost',
+      method: 'GET',
+      path: '/'
+    }
+
+    const expectedBody = chunks.join('')
+    const primaryResponsePromise = client.request(request)
+    const dispatchPausedWaitingHandler = (resumeDelay) => new Promise((resolve, reject) => {
+      let body = ''
+      let paused = false
+
+      try {
+        client.dispatch(request, {
+          onRequestStart () {},
+          onResponseStart () {},
+          onResponseData (controller, chunk) {
+            body += chunk.toString()
+
+            if (!paused) {
+              paused = true
+              controller.pause()
+              setTimeout(() => controller.resume(), resumeDelay)
+            }
+          },
+          onResponseEnd () {
+            resolve(body)
+          },
+          onResponseError (_controller, err) {
+            reject(err)
+          }
+        })
+      } catch (err) {
+        reject(err)
+      }
+    })
+
+    const waitingBodyPromise1 = dispatchPausedWaitingHandler(90)
+    const waitingBodyPromise2 = dispatchPausedWaitingHandler(130)
+    const primaryResponse = await primaryResponsePromise
+    const [
+      primaryBody,
+      waitingBody1,
+      waitingBody2
+    ] = await Promise.all([
+      primaryResponse.body.text(),
+      waitingBodyPromise1,
+      waitingBodyPromise2
+    ])
+
+    strictEqual(requestsToOrigin, 1)
+    strictEqual(primaryBody, expectedBody)
+    strictEqual(waitingBody1, expectedBody)
+    strictEqual(waitingBody2, expectedBody)
+  })
+
   test('errors paused waiting handlers when buffered data exceeds maxBufferSize', async () => {
     let requestsToOrigin = 0
     const chunk = Buffer.alloc(8 * 1024, 'a')
