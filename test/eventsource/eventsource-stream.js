@@ -103,6 +103,24 @@ describe('EventSourceStream', () => {
     }
   })
 
+  test('Should handle UTF-8 characters split across chunks.', (t) => {
+    const content = Buffer.from('data: Grüße 😀\n\n', 'utf8')
+
+    const stream = new EventSourceStream()
+
+    stream.processEvent = function (event) {
+      t.assert.strictEqual(typeof event, 'object')
+      t.assert.strictEqual(event.event, undefined)
+      t.assert.strictEqual(event.data, 'Grüße 😀')
+      t.assert.strictEqual(event.id, undefined)
+      t.assert.strictEqual(event.retry, undefined)
+    }
+
+    for (let i = 0; i < content.length; i++) {
+      stream.write(Buffer.from([content[i]]))
+    }
+  })
+
   test('Should ignore comments', (t) => {
     const content = Buffer.from(':data: Hello\n\n', 'utf8')
 
