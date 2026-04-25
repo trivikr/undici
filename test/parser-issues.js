@@ -195,3 +195,48 @@ test('refreshes wasm input view after reallocating parser buffer', async (t) => 
   t.strictEqual(largeResponse.statusCode, 200)
   t.strictEqual(largeResponse.body.toString(), largeBody.toString())
 })
+
+test('split special-case headers across multiple parser callbacks', async (t) => {
+  t = tspl(t, { plan: 5 })
+
+  const server = net.createServer(socket => {
+    socket.write('HTTP/1.1 200 OK\r\nConnec')
+    setTimeout(() => {
+      socket.write('tion: keep-')
+      setTimeout(() => {
+        socket.write('alive\r\nKeep')
+        setTimeout(() => {
+          socket.write('-Alive: timeout=')
+          setTimeout(() => {
+            socket.write('1\r\nContent-Len')
+            setTimeout(() => {
+              socket.write('gth: 5\r\nX-Test: hel')
+              setTimeout(() => {
+                socket.write('lo\r\n\r\nhello')
+              }, 20)
+            }, 20)
+          }, 20)
+        }, 20)
+      }, 20)
+    }, 20)
+  })
+  after(() => server.close())
+
+  server.listen(0, () => {
+    const client = new Client(`http://localhost:${server.address().port}`)
+    after(() => client.destroy())
+
+    client.request({
+      method: 'GET',
+      path: '/'
+    }, async (err, data) => {
+      t.ifError(err)
+      t.equal(data.headers.connection, 'keep-alive')
+      t.equal(data.headers['keep-alive'], 'timeout=1')
+      t.equal(data.headers['content-length'], '5')
+      t.equal(await data.body.text(), 'hello')
+    })
+  })
+
+  await t.completed
+})
