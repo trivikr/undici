@@ -4,6 +4,7 @@ const { tspl } = require('@matteo.collina/tspl')
 const { test, after } = require('node:test')
 const net = require('node:net')
 const { Client, errors } = require('..')
+const { kSocket, kParser } = require('../lib/core/symbols.js')
 
 test('https://github.com/mcollina/undici/issues/268', async (t) => {
   t = tspl(t, { plan: 2 })
@@ -194,4 +195,84 @@ test('refreshes wasm input view after reallocating parser buffer', async (t) => 
   const largeResponse = await request()
   t.strictEqual(largeResponse.statusCode, 200)
   t.strictEqual(largeResponse.body.toString(), largeBody.toString())
+})
+
+test('split special-case headers across multiple parser callbacks', async (t) => {
+  t = tspl(t, { plan: 5 })
+
+  const server = net.createServer(socket => {
+    socket.write('HTTP/1.1 200 OK\r\nConnec')
+    setTimeout(() => {
+      socket.write('tion: keep-')
+      setTimeout(() => {
+        socket.write('alive\r\nKeep')
+        setTimeout(() => {
+          socket.write('-Alive: timeout=')
+          setTimeout(() => {
+            socket.write('1\r\nContent-Len')
+            setTimeout(() => {
+              socket.write('gth: 5\r\nX-Test: hel')
+              setTimeout(() => {
+                socket.write('lo\r\n\r\nhello')
+              }, 20)
+            }, 20)
+          }, 20)
+        }, 20)
+      }, 20)
+    }, 20)
+  })
+  after(() => server.close())
+
+  server.listen(0, () => {
+    const client = new Client(`http://localhost:${server.address().port}`)
+    after(() => client.destroy())
+
+    client.request({
+      method: 'GET',
+      path: '/'
+    }, async (err, data) => {
+      t.ifError(err)
+      t.equal(data.headers.connection, 'keep-alive')
+      t.equal(data.headers['keep-alive'], 'timeout=1')
+      t.equal(data.headers['content-length'], '5')
+      t.equal(await data.body.text(), 'hello')
+    })
+  })
+
+  await t.completed
+})
+
+test('split connection keep-alive header updates parser keep-alive state', async (t) => {
+  t = tspl(t, { plan: 2 })
+
+  const server = net.createServer(socket => {
+    socket.once('data', () => {
+      socket.write('HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n')
+    })
+  })
+  after(() => server.close())
+
+  await new Promise(resolve => server.listen(0, resolve))
+
+  const client = new Client(`http://localhost:${server.address().port}`)
+  after(() => client.destroy())
+
+  const { body } = await client.request({
+    method: 'GET',
+    path: '/'
+  })
+  await body.text()
+
+  const parser = client[kSocket][kParser]
+  parser.headers = []
+  parser.headersSize = 0
+  parser.connectionKeepAlive = false
+
+  parser.onHeaderField(Buffer.from('Connec'))
+  parser.onHeaderField(Buffer.from('tion'))
+  parser.onHeaderValue(Buffer.from('keep-'))
+  parser.onHeaderValue(Buffer.from('alive'))
+
+  t.equal(parser.headers[0].toString(), 'Connection')
+  t.equal(parser.connectionKeepAlive, true)
 })
