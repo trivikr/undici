@@ -39,7 +39,15 @@ class FakeSocket extends EventEmitter {
 }
 
 class FakeStream extends EventEmitter {
-  setTimeout () {}
+  constructor () {
+    super()
+    this.setTimeoutCalls = 0
+  }
+
+  setTimeout () {
+    this.setTimeoutCalls++
+  }
+
   pause () {}
   resume () {}
   close () {}
@@ -226,6 +234,77 @@ test('Should remove request-owned http2 stream listeners after completion', asyn
   stream.emit('end')
 
   t.equal(stream.listenerCount('aborted'), 0)
+  t.equal(stream.listenerCount('timeout'), 0)
+  t.equal(stream.listenerCount('trailers'), 0)
+
+  await t.completed
+})
+
+test('Should not attach http2 timeout listener when body timeout is disabled', async (t) => {
+  t = tspl(t, { plan: 7 })
+
+  const http2 = require('node:http2')
+  const originalConnect = http2.connect
+
+  const stream = new FakeStream()
+  const session = new FakeSession(stream)
+
+  http2.connect = function connectStub () {
+    return session
+  }
+
+  after(() => {
+    http2.connect = originalConnect
+  })
+
+  const client = {
+    [kUrl]: new URL('https://localhost'),
+    [kSocket]: null,
+    [kMaxConcurrentStreams]: 100,
+    [kHTTP2InitialWindowSize]: null,
+    [kHTTP2ConnectionWindowSize]: null,
+    [kBodyTimeout]: 0,
+    [kStrictContentLength]: true,
+    [kQueue]: [],
+    [kRunningIdx]: 0,
+    [kPendingIdx]: 0,
+    [kRunning]: 1,
+    [kPingInterval]: 0,
+    [kOnError] (err) {
+      t.ifError(err)
+    },
+    [kResume] () {},
+    emit () {},
+    destroyed: false
+  }
+
+  const context = connectH2(client, new FakeSocket())
+
+  const request = new Request('https://localhost', {
+    path: '/',
+    method: 'GET',
+    headers: {}
+  }, {
+    onRequestStart () {},
+    onResponseStart () {},
+    onResponseData () {},
+    onResponseEnd () {},
+    onResponseError (_controller, err) {
+      t.ifError(err)
+    }
+  })
+
+  client[kQueue].push(request)
+
+  t.ok(context.write(request))
+  t.equal(stream.setTimeoutCalls, 0)
+  t.equal(stream.listenerCount('timeout'), 0)
+  t.equal(stream.listenerCount('aborted'), 1)
+  t.equal(stream.listenerCount('trailers'), 1)
+
+  stream.emit('response', { ':status': 200 })
+  stream.emit('end')
+
   t.equal(stream.listenerCount('timeout'), 0)
   t.equal(stream.listenerCount('trailers'), 0)
 
