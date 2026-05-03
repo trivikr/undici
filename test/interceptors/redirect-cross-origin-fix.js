@@ -10,7 +10,7 @@ const {
   interceptors: { redirect }
 } = undici
 
-test('Client should throw redirect loop error for cross-origin redirect', async (t) => {
+test('Client should reject cross-origin redirect', async (t) => {
   t = tspl(t, { plan: 2 })
 
   const serverA = createServer((req, res) => {
@@ -36,14 +36,14 @@ test('Client should throw redirect loop error for cross-origin redirect', async 
     })
     t.fail('Expected error but request succeeded')
   } catch (error) {
-    t.ok(error.message.includes('Redirect loop detected'), 'Error message indicates redirect loop')
-    t.ok(error.message.includes('Client or Pool'), 'Error message mentions Client or Pool')
+    t.ok(error.message.includes('different origin'), 'Error message indicates an origin mismatch')
+    t.ok(error.message.includes('Client'), 'Error message mentions Client')
   }
 
   await t.completed
 })
 
-test('Pool should throw redirect loop error for cross-origin redirect', async (t) => {
+test('Pool should reject cross-origin redirect', async (t) => {
   t = tspl(t, { plan: 2 })
 
   const serverA = createServer((req, res) => {
@@ -69,9 +69,121 @@ test('Pool should throw redirect loop error for cross-origin redirect', async (t
     })
     t.fail('Expected error but request succeeded')
   } catch (error) {
-    t.ok(error.message.includes('Redirect loop detected'), 'Error message indicates redirect loop')
-    t.ok(error.message.includes('Client or Pool'), 'Error message mentions Client or Pool')
+    t.ok(error.message.includes('different origin'), 'Error message indicates an origin mismatch')
+    t.ok(error.message.includes('Pool'), 'Error message mentions Pool')
   }
+
+  await t.completed
+})
+
+test('Client should not dispatch cross-origin redirect to the original origin', async (t) => {
+  t = tspl(t, { plan: 2 })
+  let targetRequests = 0
+
+  const serverB = createServer((req, res) => {
+    targetRequests++
+    res.writeHead(200)
+    res.end('target')
+  })
+
+  const serverA = createServer((req, res) => {
+    if (req.url === '/redirect') {
+      res.writeHead(303, {
+        Location: `http://localhost:${serverB.address().port}/target`
+      })
+      res.end()
+      return
+    }
+
+    t.fail(`unexpected request to original origin: ${req.url}`)
+    res.writeHead(200)
+    res.end('wrong origin')
+  })
+
+  serverA.listen(0)
+  serverB.listen(0)
+  after(() => {
+    serverA.close()
+    serverB.close()
+  })
+
+  await Promise.all([
+    once(serverA, 'listening'),
+    once(serverB, 'listening')
+  ])
+
+  const client = new undici.Client(`http://localhost:${serverA.address().port}`).compose(
+    redirect({ maxRedirections: 1 })
+  )
+  after(() => client.close())
+
+  try {
+    await client.request({
+      method: 'GET',
+      path: '/redirect'
+    })
+    t.fail('Expected error but request succeeded')
+  } catch (error) {
+    t.ok(error.message.includes('different origin'), 'Error message indicates an origin mismatch')
+  }
+
+  t.strictEqual(targetRequests, 0)
+
+  await t.completed
+})
+
+test('Pool should not dispatch cross-origin redirect to the original origin', async (t) => {
+  t = tspl(t, { plan: 2 })
+  let targetRequests = 0
+
+  const serverB = createServer((req, res) => {
+    targetRequests++
+    res.writeHead(200)
+    res.end('target')
+  })
+
+  const serverA = createServer((req, res) => {
+    if (req.url === '/redirect') {
+      res.writeHead(303, {
+        Location: `http://localhost:${serverB.address().port}/target`
+      })
+      res.end()
+      return
+    }
+
+    t.fail(`unexpected request to original origin: ${req.url}`)
+    res.writeHead(200)
+    res.end('wrong origin')
+  })
+
+  serverA.listen(0)
+  serverB.listen(0)
+  after(() => {
+    serverA.close()
+    serverB.close()
+  })
+
+  await Promise.all([
+    once(serverA, 'listening'),
+    once(serverB, 'listening')
+  ])
+
+  const pool = new undici.Pool(`http://localhost:${serverA.address().port}`).compose(
+    redirect({ maxRedirections: 1 })
+  )
+  after(() => pool.close())
+
+  try {
+    await pool.request({
+      method: 'GET',
+      path: '/redirect'
+    })
+    t.fail('Expected error but request succeeded')
+  } catch (error) {
+    t.ok(error.message.includes('different origin'), 'Error message indicates an origin mismatch')
+  }
+
+  t.strictEqual(targetRequests, 0)
 
   await t.completed
 })
