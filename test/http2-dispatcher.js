@@ -299,6 +299,7 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
   t = tspl(t, { plan: 3 })
 
   let postReachedServer = false
+  let upgradeSucceeded = false
 
   const server = createSecureServer({
     ...(await pem.generate({ opts: { keySize: 2048 } })),
@@ -306,14 +307,21 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
   })
 
   server.on('stream', (stream, headers) => {
-    stream.on('error', err => {
-      t.fail(err)
-    })
-
     if (headers[':method'] === 'CONNECT' && headers[':protocol'] === 'websocket') {
+      stream.on('error', err => {
+        if (upgradeSucceeded && err.code === 'ECONNRESET') {
+          return
+        }
+
+        t.fail(err)
+      })
       stream.respond({ ':status': 200 })
       return
     }
+
+    stream.on('error', err => {
+      t.fail(err)
+    })
 
     if (headers[':method'] === 'POST') {
       postReachedServer = true
@@ -345,6 +353,7 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
 
     const { socket } = await upgrade
     upgradeSocket = socket
+    upgradeSucceeded = true
     t.strictEqual(socket.closed, false)
 
     const response = await Promise.race([
