@@ -7,7 +7,6 @@ const { setTimeout: sleep } = require('node:timers/promises')
 const { Writable, pipeline, PassThrough, Readable } = require('node:stream')
 
 const { tspl } = require('@matteo.collina/tspl')
-
 const pem = require('@metcoder95/https-pem')
 
 const { Client, errors } = require('..')
@@ -16,7 +15,7 @@ const { kQueue, kRunningIdx } = require('../lib/core/symbols')
 test('Dispatcher#Stream', async t => {
   t = tspl(t, { plan: 4 })
 
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
   const expectedBody = 'hello from client!'
   const bufs = []
   let requestBody = ''
@@ -69,7 +68,7 @@ test('Dispatcher#Stream', async t => {
 test('Dispatcher#Pipeline', async t => {
   t = tspl(t, { plan: 5 })
 
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
   const expectedBody = 'hello from client!'
   const bufs = []
   let requestBody = ''
@@ -134,8 +133,8 @@ test('Dispatcher#Pipeline', async t => {
 test('Dispatcher#Connect', async t => {
   t = tspl(t, { plan: 5 })
 
-  const proxy = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const proxy = createSecureServer(pem)
+  const server = createSecureServer(pem)
 
   const expectedBody = 'hello from client!'
   let responseBody = ''
@@ -223,7 +222,7 @@ test('Dispatcher#Connect', async t => {
 })
 
 test('Dispatcher#Upgrade - Should throw on non-websocket upgrade', async t => {
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
 
   server.on('stream', async (stream, headers) => {
     stream.end()
@@ -256,7 +255,7 @@ test('Dispatcher#Upgrade', async t => {
   t = tspl(t, { plan: 3 })
 
   const server = createSecureServer({
-    ...(await pem.generate({ opts: { keySize: 2048 } })),
+    ...pem,
     settings: { enableConnectProtocol: true }
   })
 
@@ -302,7 +301,7 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
   let connectStreamClosed
 
   const server = createSecureServer({
-    ...(await pem.generate({ opts: { keySize: 2048 } })),
+    ...pem,
     settings: { enableConnectProtocol: true }
   })
 
@@ -376,7 +375,7 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
 test('Dispatcher#Upgrade rejects if stream closes before response headers', async t => {
   t = tspl(t, { plan: 2 })
 
-  const server = createSecureServer({ ...(await pem.generate({ opts: { keySize: 2048 } })), settings: { enableConnectProtocol: true } })
+  const server = createSecureServer({ ...pem, settings: { enableConnectProtocol: true } })
 
   server.on('stream', (stream) => {
     stream.close()
@@ -409,7 +408,7 @@ test('Dispatcher#Upgrade rejects if stream closes before response headers', asyn
 test('Dispatcher#Connect rejects if stream closes before response headers', async t => {
   t = tspl(t, { plan: 2 })
 
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
 
   server.on('stream', (stream) => {
     stream.close()
@@ -443,7 +442,7 @@ test('Dispatcher#Upgrade rejects websocket upgrade on non-200 HTTP/2 response', 
   t = tspl(t, { plan: 3 })
 
   const server = createSecureServer({
-    ...(await pem.generate({ opts: { keySize: 2048 } })),
+    ...pem,
     settings: { enableConnectProtocol: true }
   })
 
@@ -486,7 +485,7 @@ test('Dispatcher#destroy', async t => {
   t = tspl(t, { plan: 4 })
 
   const promises = []
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
 
   server.on('stream', (stream, headers) => {
     stream.on('error', err => {
@@ -562,7 +561,7 @@ test('Dispatcher#destroy', async t => {
 test('Should handle h2 request without body', async t => {
   t = tspl(t, { plan: 9 })
 
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
   const expectedBody = ''
   const requestChunks = []
   const responseBody = []
@@ -625,7 +624,7 @@ test('Should handle h2 request without body', async t => {
 test('Should clear h2 request stream references before completing a response', async t => {
   t = tspl(t, { plan: 6 })
 
-  const server = createSecureServer(await pem.generate({ opts: { keySize: 2048 } }))
+  const server = createSecureServer(pem)
 
   server.on('stream', (stream) => {
     stream.respond({ ':status': 200 }, { waitForTrailers: true })
