@@ -296,9 +296,10 @@ test('Dispatcher#Upgrade', async t => {
 })
 
 test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgrade', async t => {
-  t = tspl(t, { plan: 3 })
+  t = tspl(t, { plan: 4 })
 
   let postReachedServer = false
+  let connectStreamClosed
 
   const server = createSecureServer({
     ...(await pem.generate({ opts: { keySize: 2048 } })),
@@ -312,6 +313,11 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
 
     if (headers[':method'] === 'CONNECT' && headers[':protocol'] === 'websocket') {
       stream.respond({ ':status': 200 })
+      stream.resume()
+      stream.on('end', () => {
+        stream.end()
+      })
+      connectStreamClosed = once(stream, 'close')
       return
     }
 
@@ -354,9 +360,14 @@ test('Dispatcher#Upgrade resumes queued requests after successful WebSocket upgr
 
     t.ok(postReachedServer)
     t.strictEqual(response?.statusCode, 200)
+    t.strictEqual(await response.body.text(), 'ok')
   } finally {
     upgradeSocket?.on('error', () => {})
-    upgradeSocket?.end()
+    if (upgradeSocket != null && !upgradeSocket.closed) {
+      upgradeSocket.end()
+      await once(upgradeSocket, 'close')
+    }
+    await connectStreamClosed
   }
 
   await t.completed
