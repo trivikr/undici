@@ -1,124 +1,165 @@
 'use strict'
 
 const { tspl } = require('@matteo.collina/tspl')
-const { test, after } = require('node:test')
+const { once } = require('node:events')
+const { test } = require('node:test')
 const { Client } = require('..')
 const { createServer } = require('node:http')
 const { kConnect } = require('../lib/core/symbols')
 const { kBusy, kPending, kRunning } = require('../lib/core/symbols')
 
+async function waitFor (predicate) {
+  const timeout = Date.now() + 5000
+
+  while (!predicate()) {
+    if (Date.now() > timeout) {
+      throw new Error('timed out waiting for pipelined requests')
+    }
+
+    await new Promise(resolve => setImmediate(resolve))
+  }
+}
+
 test('pipeline pipelining', async (t) => {
-  t = tspl(t, { plan: 10 })
+  const p = tspl(t, { plan: 10 })
+  const responses = []
 
   const server = createServer({ joinDuplicateHeaders: true }, (req, res) => {
-    t.deepStrictEqual(req.headers['transfer-encoding'], undefined)
-    res.end()
+    p.deepStrictEqual(req.headers['transfer-encoding'], undefined)
+    responses.push(res)
   })
 
-  after(() => server.close())
-  server.listen(0, () => {
-    const client = new Client(`http://localhost:${server.address().port}`, {
-      pipelining: 2
-    })
-    after(() => client.close())
+  server.listen(0)
+  await once(server, 'listening')
 
+  const client = new Client(`http://localhost:${server.address().port}`, {
+    pipelining: 2
+  })
+
+  try {
     client.on('disconnect', () => {
       if (!client.closed && !client.destroyed) {
-        t.fail('unexpected disconnect')
+        p.fail('unexpected disconnect')
       }
     })
 
-    client[kConnect](() => {
-      t.equal(client[kRunning], 0)
-      client.pipeline({
-        method: 'GET',
-        path: '/',
-        blocking: false
-      }, ({ body }) => body).end().resume()
-      t.equal(client[kBusy], true)
-      t.deepStrictEqual(client[kRunning], 0)
-      t.deepStrictEqual(client[kPending], 1)
+    await new Promise(resolve => client[kConnect](resolve))
 
-      client.pipeline({
-        method: 'GET',
-        path: '/',
-        blocking: false
-      }, ({ body }) => body).end().resume()
-      t.equal(client[kBusy], true)
-      t.deepStrictEqual(client[kRunning], 0)
-      t.deepStrictEqual(client[kPending], 2)
-      process.nextTick(() => {
-        t.equal(client[kRunning], 2)
-      })
-    })
-  })
+    p.equal(client[kRunning], 0)
+    const first = client.pipeline({
+      method: 'GET',
+      path: '/',
+      blocking: false
+    }, ({ body }) => body)
+    const firstEnd = once(first, 'end')
+    first.end().resume()
+    p.equal(client[kBusy], true)
+    p.deepStrictEqual(client[kRunning], 0)
+    p.deepStrictEqual(client[kPending], 1)
 
-  await t.completed
+    const second = client.pipeline({
+      method: 'GET',
+      path: '/',
+      blocking: false
+    }, ({ body }) => body)
+    const secondEnd = once(second, 'end')
+    second.end().resume()
+    p.equal(client[kBusy], true)
+    p.deepStrictEqual(client[kRunning], 0)
+    p.deepStrictEqual(client[kPending], 2)
+
+    await waitFor(() => client[kRunning] === 2 && responses.length === 2)
+    p.equal(client[kRunning], 2)
+
+    for (const res of responses) {
+      res.end()
+    }
+
+    await Promise.all([firstEnd, secondEnd, p.completed])
+  } finally {
+    await client.close()
+    await new Promise(resolve => server.close(resolve))
+  }
 })
 
 test('pipeline pipelining retry', async (t) => {
-  t = tspl(t, { plan: 13 })
+  const p = tspl(t, { plan: 13 })
 
   let count = 0
+  let firstResponse = null
   const server = createServer({ joinDuplicateHeaders: true }, (req, res) => {
     if (count++ === 0) {
-      res.destroy()
+      firstResponse = res
     } else {
       res.end()
     }
   })
 
-  after(() => server.close())
-  server.listen(0, () => {
-    const client = new Client(`http://localhost:${server.address().port}`, {
-      pipelining: 3
-    })
-    after(() => client.destroy())
+  server.listen(0)
+  await once(server, 'listening')
 
-    client.once('disconnect', () => {
-      t.ok(true, 'pass')
-    })
-
-    client[kConnect](() => {
-      client.pipeline({
-        method: 'GET',
-        path: '/',
-        blocking: false
-      }, ({ body }) => body).end().resume()
-        .on('error', (err) => {
-          t.ok(err)
-        })
-      t.equal(client[kBusy], true)
-      t.deepStrictEqual(client[kRunning], 0)
-      t.deepStrictEqual(client[kPending], 1)
-
-      client.pipeline({
-        method: 'GET',
-        path: '/',
-        blocking: false
-      }, ({ body }) => body).end().resume()
-      t.equal(client[kBusy], true)
-      t.deepStrictEqual(client[kRunning], 0)
-      t.deepStrictEqual(client[kPending], 2)
-
-      client.pipeline({
-        method: 'GET',
-        path: '/',
-        blocking: false
-      }, ({ body }) => body).end().resume()
-      t.equal(client[kBusy], true)
-      t.deepStrictEqual(client[kRunning], 0)
-      t.deepStrictEqual(client[kPending], 3)
-
-      process.nextTick(() => {
-        t.equal(client[kRunning], 3)
-      })
-
-      client.close(() => {
-        t.ok(true, 'pass')
-      })
-    })
+  const client = new Client(`http://localhost:${server.address().port}`, {
+    pipelining: 3
   })
 
-  await t.completed
+  try {
+    client.once('disconnect', () => {
+      p.ok(true, 'pass')
+    })
+
+    await new Promise(resolve => client[kConnect](resolve))
+
+    const first = client.pipeline({
+      method: 'GET',
+      path: '/',
+      blocking: false
+    }, ({ body }) => body)
+    const firstError = once(first, 'error').then(([err]) => {
+      p.ok(err)
+    })
+    first.end().resume()
+    p.equal(client[kBusy], true)
+    p.deepStrictEqual(client[kRunning], 0)
+    p.deepStrictEqual(client[kPending], 1)
+
+    const second = client.pipeline({
+      method: 'GET',
+      path: '/',
+      blocking: false
+    }, ({ body }) => body)
+    const secondEnd = once(second, 'end')
+    second.end().resume()
+    p.equal(client[kBusy], true)
+    p.deepStrictEqual(client[kRunning], 0)
+    p.deepStrictEqual(client[kPending], 2)
+
+    const third = client.pipeline({
+      method: 'GET',
+      path: '/',
+      blocking: false
+    }, ({ body }) => body)
+    const thirdEnd = once(third, 'end')
+    third.end().resume()
+    p.equal(client[kBusy], true)
+    p.deepStrictEqual(client[kRunning], 0)
+    p.deepStrictEqual(client[kPending], 3)
+
+    await waitFor(() => client[kRunning] === 3 && firstResponse)
+    p.equal(client[kRunning], 3)
+
+    firstResponse.destroy()
+
+    await Promise.all([firstError, secondEnd, thirdEnd])
+    await new Promise(resolve => {
+      client.close(() => {
+        p.ok(true, 'pass')
+        resolve()
+      })
+    })
+
+    await p.completed
+  } finally {
+    client.destroy()
+    await new Promise(resolve => server.close(resolve))
+  }
 })
