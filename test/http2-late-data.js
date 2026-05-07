@@ -2,6 +2,7 @@
 
 const { test, after } = require('node:test')
 const { EventEmitter } = require('node:events')
+const { setImmediate: immediate } = require('node:timers/promises')
 const { tspl } = require('@matteo.collina/tspl')
 
 const connectH2 = require('../lib/dispatcher/client-h2')
@@ -161,6 +162,81 @@ test('Should ignore late http2 data after request completion', async (t) => {
   await t.completed
 })
 
+test('Should keep listening for http2 trailers after stream end', async (t) => {
+  t = tspl(t, { plan: 4 })
+
+  const http2 = require('node:http2')
+  const originalConnect = http2.connect
+
+  const stream = new FakeStream()
+  const session = new FakeSession(stream)
+
+  http2.connect = function connectStub () {
+    return session
+  }
+
+  after(() => {
+    http2.connect = originalConnect
+  })
+
+  let onCompleteCalls = 0
+
+  const client = {
+    [kUrl]: new URL('https://localhost'),
+    [kSocket]: null,
+    [kMaxConcurrentStreams]: 100,
+    [kHTTP2InitialWindowSize]: null,
+    [kHTTP2ConnectionWindowSize]: null,
+    [kBodyTimeout]: 30_000,
+    [kStrictContentLength]: true,
+    [kQueue]: [],
+    [kRunningIdx]: 0,
+    [kPendingIdx]: 0,
+    [kRunning]: 1,
+    [kPingInterval]: 0,
+    [kOnError] (err) {
+      t.ifError(err)
+    },
+    [kResume] () {},
+    emit () {},
+    destroyed: false
+  }
+
+  const context = connectH2(client, new FakeSocket())
+
+  const request = new Request('https://localhost', {
+    path: '/',
+    method: 'GET',
+    headers: {}
+  }, {
+    onRequestStart () {},
+    onResponseStart () {},
+    onResponseData () {},
+    onResponseEnd (_controller, trailers) {
+      onCompleteCalls++
+      t.strictEqual(trailers['x-trailer'], 'hello')
+    },
+    onResponseError (_controller, err) {
+      t.ifError(err)
+    }
+  })
+
+  client[kQueue].push(request)
+
+  t.ok(context.write(request))
+
+  stream.emit('response', { ':status': 200 })
+  stream.emit('end')
+  stream.emit('trailers', { 'x-trailer': 'hello' })
+
+  await immediate()
+
+  t.strictEqual(onCompleteCalls, 1)
+  t.equal(stream.listenerCount('trailers'), 0)
+
+  await t.completed
+})
+
 test('Should remove request-owned http2 stream listeners after completion', async (t) => {
   t = tspl(t, { plan: 7 })
 
@@ -224,6 +300,8 @@ test('Should remove request-owned http2 stream listeners after completion', asyn
 
   stream.emit('response', { ':status': 200 })
   stream.emit('end')
+
+  await immediate()
 
   t.equal(stream.listenerCount('aborted'), 0)
   t.equal(stream.listenerCount('timeout'), 0)
