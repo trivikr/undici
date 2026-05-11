@@ -2,6 +2,7 @@
 
 const { tspl } = require('@matteo.collina/tspl')
 const { createServer } = require('node:http')
+const { createServer: createNetServer } = require('node:net')
 const { test, after, describe } = require('node:test')
 const { request, errors } = require('..')
 
@@ -559,6 +560,31 @@ test('request should include statusText in response', async t => {
 
   t.strictEqual(statusText, 'Custom Status Text')
   await body.dump()
+  t.ok('request completed')
+})
+
+test('request should include statusText in response when reason phrase is split', async t => {
+  t = tspl(t, { plan: 3 })
+
+  const server = createNetServer((socket) => {
+    socket.write('HTTP/1.1 200 O')
+    socket.write('K\r\ncontent-length: 5\r\n\r\nhello')
+  })
+
+  after(() => {
+    server.close()
+  })
+
+  await new Promise((resolve) => server.listen(0, resolve))
+
+  const { statusText, body } = await request({
+    method: 'GET',
+    origin: `http://localhost:${server.address().port}`,
+    path: '/'
+  })
+
+  t.strictEqual(statusText, 'OK')
+  t.strictEqual(await body.text(), 'hello')
   t.ok('request completed')
 })
 
