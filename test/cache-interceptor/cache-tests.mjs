@@ -46,6 +46,10 @@ const CLI_OPTIONS = parseArgs({
     // Only shows errors
     ci: {
       type: 'boolean'
+    },
+    // Run cache-tests workers one at a time.
+    serial: {
+      type: 'boolean'
     }
   }
 })
@@ -122,6 +126,9 @@ const testEnvironments = filterEnvironments(
 
 console.log(`Testing ${testEnvironments.length} environments\n`)
 console.log(`PROTOCOL: ${styleText('gray', PROTOCOL)}`)
+if (shouldRunWorkersSerially()) {
+  console.log(`WORKERS: ${styleText('gray', 'serial')}`)
+}
 console.log('')
 
 /**
@@ -136,11 +143,55 @@ console.log('')
 const results = []
 
 // Run all the tests in child processes because the test runner is a bit finicky
-for (let i = 0; i < testEnvironments.length; i++) {
-  const environment = testEnvironments[i]
-  const port = PORT + i
+if (shouldRunWorkersSerially()) {
+  for (let i = 0; i < testEnvironments.length; i++) {
+    results.push(await runWorker(testEnvironments[i], PORT + i, i))
+  }
+} else {
+  const workerPromises = []
+  for (let i = 0; i < testEnvironments.length; i++) {
+    workerPromises.push(runWorker(testEnvironments[i], PORT + i, i))
+  }
 
-  const promise = new Promise((resolve) => {
+  results.push(...await Promise.all(workerPromises))
+}
+
+// Status code so we can fail CI jobs if we need
+let exitCode = 0
+
+// Print the results of all the results in the order that they exist
+for (const result of results) {
+  if (result.code !== 0 || result.signal !== null) {
+    exitCode = result.code ?? 1
+  }
+
+  for (const line of result.stdout) {
+    process.stdout.write(line)
+  }
+
+  if (result.code !== 0 || result.signal !== null) {
+    console.error(`cache-tests worker failed: port=${result.port} store=${result.environment.cacheStore ?? 'default'} type=${result.environment.opts.type ?? 'default'} code=${result.code ?? 'null'} signal=${result.signal ?? 'null'}`)
+  }
+
+  console.log('')
+}
+
+exit(exitCode)
+
+/**
+ * @param {TestEnvironment} environment
+ * @param {number} port
+ * @param {number} index
+ * @returns {Promise<{
+ *  code: number | null,
+ *  signal: NodeJS.Signals | null,
+ *  stdout: Buffer[],
+ *  environment: TestEnvironment,
+ *  port: number
+ * }>}
+ */
+function runWorker (environment, port, index) {
+  return new Promise((resolve) => {
     const cacheTestsWorkerProcess = fork(join(import.meta.dirname, 'cache-tests-worker.mjs'), {
       stdio: 'pipe',
       env: {
@@ -151,7 +202,7 @@ for (let i = 0; i < testEnvironments.length; i++) {
         CI: CLI_OPTIONS.values.ci ? 'true' : undefined,
         npm_config_protocol: PROTOCOL,
         npm_config_port: `${port}`,
-        npm_config_pidfile: join(tmpdir(), `http-cache-test-server-${i}.pid`)
+        npm_config_pidfile: join(tmpdir(), `http-cache-test-server-${index}.pid`)
       }
     })
 
@@ -178,31 +229,11 @@ for (let i = 0; i < testEnvironments.length; i++) {
       })
     })
   })
-
-  results.push(promise)
 }
 
-// Status code so we can fail CI jobs if we need
-let exitCode = 0
-
-// Print the results of all the results in the order that they exist
-for (const result of await Promise.all(results)) {
-  if (result.code !== 0 || result.signal !== null) {
-    exitCode = result.code ?? 1
-  }
-
-  for (const line of result.stdout) {
-    process.stdout.write(line)
-  }
-
-  if (result.code !== 0 || result.signal !== null) {
-    console.error(`cache-tests worker failed: port=${result.port} store=${result.environment.cacheStore ?? 'default'} type=${result.environment.opts.type ?? 'default'} code=${result.code ?? 'null'} signal=${result.signal ?? 'null'}`)
-  }
-
-  console.log('')
+function shouldRunWorkersSerially () {
+  return CLI_OPTIONS.values.serial === true || process.env.CACHE_TESTS_SERIAL === 'true'
 }
-
-exit(exitCode)
 
 /**
  * @param {number} idx

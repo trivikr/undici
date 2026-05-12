@@ -124,6 +124,7 @@ jobs:
         id: test-cache-tests
         env:
           CI: true
+          CACHE_TESTS_SERIAL: ${{ runner.os == 'Windows' && inputs.node-version == '24' && 'true' || '' }}
           NODE_V8_COVERAGE: ${{ inputs.codecov == true && './coverage/tmp' || '' }} 
           UNDICI_NO_WASM_SIMD: ${{ inputs['no-wasm-simd'] }}
       
